@@ -1,0 +1,1 @@
+python -m vllm.entrypoints.api_server --model ~/data/models/llama-2-7b-hf/ --tokenizer ~/data/models/llama-2-7b-hf/ --gpu-memory-utilization 0.9 --max-num-batched-tokens 4096 --max-num-seqs 4096
