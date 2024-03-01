@@ -38,10 +38,50 @@ def sample_requests(
     dataset_path: str,
     num_requests: int,
     tokenizer: PreTrainedTokenizerBase,
-    config_input_len: int,
-    config_output_len: int,
+    prompt_len: int,
+    gen_len: int
 ) -> List[Tuple[str, int, int]]:
-    return [("hi " * config_input_len, config_input_len, config_output_len)]
+    # return [("hi " * config_input_len, config_input_len, config_output_len) * num_requests]
+
+    # Load the dataset.
+    with open(dataset_path) as f:
+        dataset = json.load(f)
+    # Filter out the conversations with less than 2 turns.
+    dataset = [
+        data for data in dataset
+        if len(data["conversations"]) >= 2
+    ]
+    # Only keep the first two turns of each conversation.
+    dataset = [
+        (data["conversations"][0]["value"], data["conversations"][1]["value"])
+        for data in dataset
+    ]
+
+    # Tokenize the prompts and completions.
+    prompts = [prompt for prompt, _ in dataset]
+    prompt_token_ids = tokenizer(prompts).input_ids
+    completions = [completion for _, completion in dataset]
+    completion_token_ids = tokenizer(completions).input_ids
+    tokenized_dataset = []
+    for i in range(len(dataset)):
+        output_len = len(completion_token_ids[i])
+        tokenized_dataset.append((prompts[i], prompt_token_ids[i], output_len))
+
+    # Filter out too long sequences.
+    filtered_dataset: List[Tuple[str, int, int]] = []
+    for _, prompt_token_ids, output_len in tokenized_dataset:
+        cur_prompt_len = len(prompt_token_ids)
+        if cur_prompt_len < prompt_len:
+            continue
+
+        # truncate prompt to the given length
+        trunc_prompt = tokenizer.decode(prompt_token_ids[:prompt_len])
+        filtered_dataset.append((trunc_prompt, prompt_len, gen_len))
+
+    # Sample the requests.
+    sampled_requests = random.sample(filtered_dataset, num_requests)
+    return sampled_requests
+
 async def get_request(
     input_requests: List[Tuple[str, int, int]],
     request_rate: float,
@@ -165,6 +205,7 @@ def main(args: argparse.Namespace):
     api_url = f"http://{args.host}:{args.port}/generate"
     tokenizer = get_tokenizer(args.tokenizer, trust_remote_code=args.trust_remote_code)
     input_requests = sample_requests(args.dataset, args.num_prompts, tokenizer, args.input_len, args.output_len)
+    print(len(input_requests))
 
     benchmark_start_time = time.perf_counter()
     asyncio.run(benchmark(args.backend, api_url, input_requests, args.best_of,
@@ -246,7 +287,7 @@ if __name__ == "__main__":
                         help="Generates `best_of` sequences per prompt and "
                              "returns the best one.")
     parser.add_argument("--use-beam-search", action="store_true")
-    parser.add_argument("--num-prompts", type=int, default=1000,
+    parser.add_argument("--num-prompts", type=int, default=100,
                         help="Number of prompts to process.")
     parser.add_argument("--request-rate", type=float, default=float("inf"),
                         help="Number of requests per second. If this is inf, "
